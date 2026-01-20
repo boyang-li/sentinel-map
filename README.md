@@ -123,7 +123,7 @@ make build
 cd modules/perception
 
 python detect_and_extract.py \
-  --video ../../data/videos/dashcam_001.mp4 \
+  --video ../../data/videos/20260118191513_035087.MP4 \
   --output-csv ../../data/detections/detections.csv \
   --output-patches ../../data/roi_patches \
   --sample-fps 1 \
@@ -131,8 +131,9 @@ python detect_and_extract.py \
 ```
 
 **Output**:
-- `data/detections/detections.csv` (473 rows)
-- `data/roi_patches/frame_*.jpg` (473 images)
+- `data/detections/detections.csv` (58 detections)
+- `data/roi_patches/frame_*.jpg` (58 ROI images, 256×256)
+- Processing time: 16.49s for 563MB video
 
 #### Step 2: Stream to Kafka (Module B)
 ```bash
@@ -147,9 +148,9 @@ cd modules/ingestion
 
 **Output**:
 ```
-📊 Metrics - Sent: 473 | Acked: 473 | Failed: 0
-⏱️  Total Time: 806ms
-🚀 Throughput: 586.69 messages/sec
+📊 Metrics - Sent: 58 | Acked: 58 | Failed: 0
+⏱️  Total Time: 782ms
+🚀 Throughput: 74.17 messages/sec
 ✅ Success Rate: 100.00%
 ```
 
@@ -224,18 +225,29 @@ frame_number,timestamp_sec,u,v,confidence,class_name,vehicle_lat,vehicle_lon,hea
 ### Module A: Perception
 | Metric | Value |
 |--------|-------|
-| Inference Time | ~10ms per frame |
-| Throughput | ~96 FPS (M4 MPS) |
-| Real-time Factor | 96× faster than real-time |
+| Inference Time | ~45ms per frame |
+| Throughput | ~11 FPS (M4 MPS) |
+| Real-time Factor | 11× faster than real-time |
 | Memory Usage | ~2GB GPU, ~500MB RAM |
+
+**Latest Test** (563MB video, 5,400 frames):
+- Processed 180 frames @ 1 FPS sampling
+- Found 58 traffic light detections
+- Processing time: 16.49s (10.92 FPS avg)
 
 ### Module B: Ingestion
 | Metric | Value |
 |--------|-------|
-| Parse Rate | 1.7M records/sec |
-| Kafka Throughput | 5K-15K msg/sec |
+| Parse Rate | 144K records/sec |
+| Kafka Throughput | 74-587 msg/sec (tested) |
 | Success Rate | 100% (with retry) |
 | Latency (P99) | <100ms |
+
+**Latest Test** (58 detections → Kafka):
+- Messages sent: 58, Acked: 58, Failed: 0
+- Throughput: 74.17 msg/sec
+- Total time: 782ms
+- Success rate: 100%
 
 ### Expected Production Scale
 - **Input**: 256GB video (~100 hours at 30 FPS)
@@ -317,11 +329,14 @@ KAFKA_BATCH_SIZE=16384
 - [x] Local MVP (Streamlit app with OSM integration)
 - [x] Module A: YOLOv8 detection with M4 MPS acceleration
 - [x] Module A: ROI patch extraction (256×256)
+- [x] Module A: GPS coordinate simulation (OCR planned)
 - [x] Module B: Golang Kafka producer with goroutines
 - [x] Module B: CSV streaming with GPS support
 - [x] Module B: Exponential backoff + idempotent writes
 - [x] Confluent Cloud integration (100% success rate)
-- [x] End-to-end testing (473 msgs, 586 msg/sec)
+- [x] End-to-end testing (58 detections, 100% delivery)
+- [x] Modular architecture (modules/perception + modules/ingestion)
+- [x] Comprehensive documentation (READMEs + test results)
 
 ### In Progress 🚧
 - [ ] Module A: OCR-based GPS extraction from overlays
