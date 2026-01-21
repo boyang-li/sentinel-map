@@ -83,6 +83,19 @@ venv/
 env/
 .env
 
+# Snowflake credentials
+modules/data-modeling/.env
+
+# OSM data files (large)
+*.osm
+*.osm.gz
+*.osm.xml
+local-mvp/toronto_full.osm
+local-mvp/toronto_traffic.xml
+local-mvp/osm_toronto.xml
+local-mvp/osm_auto.xml
+local-mvp/osm_tiled.xml
+
 # Go binaries and dependencies
 modules/ingestion/bin/
 modules/ingestion/vendor/

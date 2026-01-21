@@ -382,9 +382,8 @@ MIT License - See [LICENSE](LICENSE) for details
 ## 📬 Contact
 
 **Author**: Boyang Li  
-**Email**: [your-email]  
-**LinkedIn**: [your-linkedin]  
-**GitHub**: [your-github]
+**Email**: bryanli2009@live.ca
+**LinkedIn**: [\linkedin\]  ](https://www.linkedin.com/in/boyang419/)
 
 ---
 
