@@ -1,0 +1,194 @@
+#!/usr/bin/env python3
+"""
+Test OCR-based GPS extraction from video frame overlay
+"""
+import cv2
+import numpy as np
+import re
+from pathlib import Path
+
+def extract_gps_from_frame_ocr(frame: np.ndarray, debug: bool = False) -> tuple:
+    """
+    Extract GPS coordinates from frame overlay using OCR
+    
+    Args:
+        frame: Video frame (numpy array)
+        debug: If True, show cropped region and OCR output
+        
+    Returns:
+        (latitude, longitude, heading) tuple or (None, None, None) if extraction fails
+    """
+    try:
+        import pytesseract
+    except ImportError:
+        print("⚠️  pytesseract not installed. Install with: pip install pytesseract")
+        return None, None, None
+    
+    h, w = frame.shape[:2]
+    
+    # Extract bottom-left region where GPS overlay typically appears
+    # Adjust these coordinates based on your video format
+    overlay_height = int(h * 0.15)  # Bottom 15% of frame
+    overlay_width = int(w * 0.35)   # Left 35% of frame
+    
+    overlay_region = frame[h - overlay_height:h, 0:overlay_width]
+    
+    if debug:
+        cv2.imwrite('/tmp/overlay_region.png', overlay_region)
+        print(f"📍 Overlay region saved to /tmp/overlay_region.png")
+    
+    # Preprocess for better OCR
+    gray = cv2.cvtColor(overlay_region, cv2.COLOR_BGR2GRAY)
+    
+    # Try multiple preprocessing approaches
+    # Approach 1: Simple threshold (white text on dark background)
+    _, binary1 = cv2.threshold(gray, 127, 255, cv2.THRESH_BINARY)
+    
+    # Approach 2: Inverted threshold (dark text on white background)
+    _, binary2 = cv2.threshold(gray, 127, 255, cv2.THRESH_BINARY_INV)
+    
+    # Approach 3: Adaptive threshold
+    binary3 = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+                                     cv2.THRESH_BINARY, 11, 2)
+    
+    if debug:
+        cv2.imwrite('/tmp/overlay_binary1.png', binary1)
+        cv2.imwrite('/tmp/overlay_binary2.png', binary2)
+        cv2.imwrite('/tmp/overlay_binary3.png', binary3)
+        print(f"📍 Preprocessed overlays saved to /tmp/overlay_binary*.png")
+    
+    # Try OCR on all approaches and pick the best result
+    results = []
+    for i, img in enumerate([binary1, binary2, binary3], 1):
+        text = pytesseract.image_to_string(img, config='--psm 6')
+        results.append((i, text))
+        if debug:
+            print(f"\n📝 OCR Output (approach {i}):\n{text}")
+    
+    # Use the result with most digits (likely has GPS coordinates)
+    best_text = max(results, key=lambda x: sum(c.isdigit() for c in x[1]))[1]
+    
+    if debug:
+        print(f"\n✨ Using best OCR result (most digits)")
+        print(f"📝 Best OCR:\n{best_text}\n")
+    
+    # Parse GPS coordinates from text
+    # VIOFO A119 V3 format: "N43.792879 W79.314193"
+    # Also support spaces: "N43. 792879 W79. 314193" (OCR may insert spaces)
+    
+    lat = None
+    lon = None
+    heading = None
+    
+    text = best_text
+    
+    # Try to find latitude - VIOFO format: N43.792879
+    lat_patterns = [
+        r'[NS]\s*(\d+\.?\s*\d+)',  # N43.792879 or N43. 792879 (with OCR spacing)
+        r'lat[:\s]+(-?\d+\.?\d*)',  # Lat: 43.7900 (fallback)
+    ]
+    for pattern in lat_patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            # Remove ALL spaces that OCR may insert (including inside numbers)
+            lat_str = match.group(1).replace(' ', '').replace('\n', '')
+            try:
+                lat = float(lat_str)
+                # Handle N/S designation
+                if 'S' in match.group(0).upper():
+                    lat = -abs(lat)
+                if debug:
+                    print(f"  Latitude matched: '{match.group(0)}' → {lat}")
+                break
+            except ValueError:
+                if debug:
+                    print(f"  Failed to parse latitude: '{lat_str}'")
+                continue
+    
+    # Try to find longitude - VIOFO format: W79.314193
+    lon_patterns = [
+        r'[EW]\s*(\d+\.?\s*\d+)',  # W79.314193 or W79. 314193 (with OCR spacing)
+        r'lon[:\s]+(-?\d+\.?\d*)',  # Lon: -79.3140 (fallback)
+    ]
+    for pattern in lon_patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            # Remove ALL spaces that OCR may insert
+            lon_str = match.group(1).replace(' ', '').replace('\n', '')
+            try:
+                lon = float(lon_str)
+                # Handle E/W designation (West is negative)
+                if 'W' in match.group(0).upper():
+                    lon = -abs(lon)
+                if debug:
+                    print(f"  Longitude matched: '{match.group(0)}' → {lon}")
+                break
+            except ValueError:
+                if debug:
+                    print(f"  Failed to parse longitude: '{lon_str}'")
+                continue
+    
+    # Try to find heading/speed (KM/H often appears before coordinates)
+    heading_patterns = [
+        r'(\d+)\s*KM/H',  # "40 KM/H" (speed, but can use as heading approximation)
+        r'h(?:ea)?d(?:ing)?[:\s]+(\d+\.?\d*)',  # Heading: 45.0 or HDG: 45
+    ]
+    for pattern in heading_patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            heading = float(match.group(1))
+            if debug:
+                print(f"  Speed/Heading matched: '{match.group(0)}' → {heading}")
+            break
+    
+    if debug:
+        print(f"✅ Parsed: lat={lat}, lon={lon}, heading={heading}")
+    
+    return lat, lon, heading
+
+
+def main():
+    """Test GPS extraction on sample frame"""
+    # Test with sample frame
+    test_frame_path = Path(__file__).parent.parent.parent / "local-mvp" / "vid_frame.png"
+    
+    if not test_frame_path.exists():
+        print(f"❌ Test frame not found: {test_frame_path}")
+        return
+    
+    print("="*80)
+    print("GPS OCR Extraction Test")
+    print("="*80)
+    print(f"📂 Loading frame: {test_frame_path}")
+    
+    frame = cv2.imread(str(test_frame_path))
+    if frame is None:
+        print(f"❌ Failed to load image")
+        return
+    
+    h, w = frame.shape[:2]
+    print(f"📐 Frame size: {w}x{h}")
+    
+    # Test extraction with debug output
+    lat, lon, heading = extract_gps_from_frame_ocr(frame, debug=True)
+    
+    print("\n" + "="*80)
+    print("RESULTS")
+    print("="*80)
+    
+    if lat is not None and lon is not None:
+        print(f"✅ Successfully extracted GPS:")
+        print(f"   Latitude:  {lat:.6f}")
+        print(f"   Longitude: {lon:.6f}")
+        print(f"   Heading:   {heading:.1f}°" if heading else "   Heading:   Not found")
+    else:
+        print("❌ Failed to extract GPS coordinates")
+        print("\n💡 Tips:")
+        print("   1. Check /tmp/overlay_region.png - is the GPS text visible?")
+        print("   2. Check /tmp/overlay_preprocessed.png - is the text clear?")
+        print("   3. Adjust overlay_height/overlay_width in extract_gps_from_frame_ocr()")
+        print("   4. Update regex patterns to match your video's GPS format")
+
+
+if __name__ == "__main__":
+    main()
